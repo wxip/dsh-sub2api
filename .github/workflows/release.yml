@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release (for example v0.2.2)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out version tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Validate tag and package version
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { appendFileSync, readFileSync } from 'node:fs'
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+          const tag = process.env.RELEASE_TAG
+          assert.equal(tag, `v${pkg.version}`, 'Tag must match package.json version')
+          assert.equal(lock.version, pkg.version, 'Lockfile version must match package.json')
+          assert.equal(lock.packages[''].version, pkg.version, 'Lockfile root version must match package.json')
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\nprerelease=${pkg.version.includes('-')}\n`)
+          NODE
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build and test
+        run: npm test
+
+      - name: Package prebuilt plugin
+        run: |
+          mkdir -p release
+          npm pack --ignore-scripts --json --pack-destination release > pack-result.json
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          const [pkg] = JSON.parse(readFileSync('pack-result.json', 'utf8'))
+          const files = new Set(pkg.files.map(file => file.path))
+          for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/client.js', 'cordis.patch.yml']) {
+            assert.ok(files.has(required), `Release package is missing ${required}`)
+          }
+          NODE
+          (cd release && sha256sum *.tgz > SHA256SUMS)
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/* --clobber
+          else
+            flags=()
+            if [[ "$PRERELEASE" == "true" ]]; then
+              flags+=(--prerelease --latest=false)
+            fi
+            gh release create "$RELEASE_TAG" release/* \
+              --verify-tag --title "$RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi

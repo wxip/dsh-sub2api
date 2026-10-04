@@ -107,6 +107,37 @@ npm run build     # tsdown → lib/ + client wrapper
 npm run typecheck
 ```
 
+## GitHub Releases
+
+Pushing a `v<version>` tag runs `.github/workflows/release.yml`: install locked dependencies, typecheck, build and test, then package the prebuilt plugin and publish a GitHub Release with the `.tgz` and `SHA256SUMS` assets. The tag must match the versions in `package.json` and `package-lock.json`. Versions containing a prerelease identifier, such as `v0.2.3-rc.1`, create prereleases. Reruns update assets on the existing release. The workflow uses GitHub's built-in `GITHUB_TOKEN`; no npm publishing token is required.
+
+Commit and push the code and workflow before pushing the tag. This example uses this checkout's `github` remote; substitute the remote for your target repository:
+
+```bash
+git push github HEAD
+git tag v0.2.2
+git push github v0.2.2
+```
+
+To release an existing tag manually, open **Actions → Release → Run workflow** and enter the tag. Manual dispatch requires the workflow on the default branch. The workflow publishes Release assets only, not to npm.
+
+Download the `.tgz` from the Release's **Assets**, then install it:
+
+```powershell
+dsh plugin --profile desktop add "C:\Users\admin\Downloads\godd6366-dsh-sub2api-0.2.2.tgz"
+```
+
+Replace `desktop` with `web` for the Web profile. The package includes compiled plugin files and does not require permission to run a Git dependency's `prepare` script. GitHub's automatically generated Source code archives are not substitutes for this installation package.
+
+To create the same package locally:
+
+```bash
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm pack --ignore-scripts
+```
+
 ## License
 
 MIT

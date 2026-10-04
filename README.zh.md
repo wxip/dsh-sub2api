@@ -109,6 +109,37 @@ npm run build     # tsdown → lib/ + client wrapper
 npm run typecheck
 ```
 
+## 发布到 GitHub Release
+
+推送 `v<版本号>` 标签后，`.github/workflows/release.yml` 自动安装锁定依赖、执行类型检查和测试、生成 npm 安装包，再创建 GitHub Release 并上传 `.tgz` 和 `SHA256SUMS`。标签必须与 `package.json` 和 `package-lock.json` 的版本一致；含预发布标识的版本（如 `v0.2.3-rc.1`）自动标记为 prerelease。重复运行时会更新已有 Release 的同名附件。工作流使用 GitHub 自带的 `GITHUB_TOKEN`，无需 npm 发布令牌。
+
+先提交并推送代码及工作流，再推送标签。以下示例发布到本仓库的 `github` remote；发布到其他仓库时替换 remote 名称：
+
+```bash
+git push github HEAD
+git tag v0.2.2
+git push github v0.2.2
+```
+
+也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已有标签手动发布；手动触发需要工作流已存在于默认分支。工作流只发布 Release 附件，不发布到 npm。
+
+从 Release 的 **Assets** 下载 `.tgz` 安装包，再执行：
+
+```powershell
+dsh plugin --profile desktop add "C:\Users\admin\Downloads\godd6366-dsh-sub2api-0.2.2.tgz"
+```
+
+Web profile 将 `desktop` 替换为 `web`。`.tgz` 包含已构建的插件文件，安装时无需 Git 来源的 `prepare` 构建许可；GitHub 自动生成的 Source code 压缩包不能替代该安装包。
+
+本地生成同样的安装包：
+
+```bash
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm pack --ignore-scripts
+```
+
 ## 许可证
 
 MIT
