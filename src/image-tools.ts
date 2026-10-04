@@ -480,6 +480,14 @@ export function registerImageTools(ctx: Context, host: ImageToolHost): void {
                 width: { type: 'integer', required: true },
                 height: { type: 'integer', required: true },
                 name: { type: 'string' },
+                originalDimensions: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    width: { type: 'integer', required: true },
+                    height: { type: 'integer', required: true },
+                  },
+                },
               },
             },
           },

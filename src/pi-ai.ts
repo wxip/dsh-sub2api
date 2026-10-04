@@ -71,7 +71,8 @@ function catalogInputModalities(model: { id: string; input?: Array<'text' | 'ima
  * becomes `off` with wire spelling `none`, which pi-ai dispatches as
  * `reasoning_effort: "none"` (chat/completions) or `reasoning:{effort:"none"}`
  * (responses) — exactly what this plugin used to send. An empty list declares
- * a non-reasoning model; unmappable ids are dropped.
+ * a non-reasoning model, as does a list containing only off/none; unmappable
+ * ids are dropped.
  */
 function translateReasoningEfforts(model: CatalogModel): false | Partial<Record<string, string | null>> | undefined {
   const ids = model.reasoningEfforts
@@ -86,7 +87,8 @@ function translateReasoningEfforts(model: CatalogModel): false | Partial<Record<
     if (id === 'none') efforts.off = 'none'
     else if (THINKING_LEVELS.includes(id)) efforts[id] = id
   }
-  return Object.keys(efforts).length > 0 ? efforts : undefined
+  if (Object.keys(efforts).length === 0) return undefined
+  return Object.keys(efforts).some(level => level !== 'off') ? efforts : false
 }
 
 /** One configured catalog model, translated onto pi-ai's per-model fields. */
@@ -170,7 +172,7 @@ export function translateToPiAi(config: Config): Record<string, PiAiProviderProf
 export async function syncPiAiProfiles(ctx: Context, config: Config): Promise<void> {
   const settings = ctx.get('settings')
   if (settings === undefined) return
-  const current = settings.get(PI_AI_NS) as PiAiSettingsSection | undefined
+  const current = settings.describe().find(section => section.ns === PI_AI_NS)?.value as PiAiSettingsSection | undefined
   const providers: Record<string, PiAiProviderProfile> = { ...(current?.providers ?? {}) }
   for (const route of Object.keys(providers)) {
     if (route.startsWith(ROUTE_PREFIX)) delete providers[route]

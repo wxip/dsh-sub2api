@@ -21,18 +21,19 @@
  *
  * Keys are stored through the harness credential seam; the base URL and
  * per-key model catalogs live in the `llm-sub2api:` settings section
- * (`$DSH_HOME/settings.yaml`, written by the web Models page).
+ * (the active profile `cordis.patch.yml`, written by the web settings page).
  *
  * @module dsh-sub2api
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-llm'
 import {
   LlmError,
   assertUsableApiKey,
 } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
@@ -155,6 +156,22 @@ export interface Config {
   tools?: ImageToolsConfig
 }
 
+/** Live configuration references owned by the DSH Loader. */
+export interface LiveConfig {
+  baseURL: Volatile<string>
+  providers: Volatile<Record<ProviderKey, ProviderProfile>>
+  tools: Volatile<ImageToolsConfig>
+}
+
+/** Capture one configuration snapshot for a gateway operation. */
+export function readConfig(config: LiveConfig): Config {
+  return {
+    baseURL: config.baseURL.get(),
+    providers: structuredClone(config.providers.get()) as Config['providers'],
+    tools: structuredClone(config.tools.get()),
+  }
+}
+
 const catalogModel = z.object({
   id: z.string().required(),
   name: z.string(),
@@ -193,16 +210,16 @@ const imageToolModelRef = z.object({
   model: z.string(),
 })
 
-export const Config: z<Config> = z.object({
-  baseURL: z.string(),
+export const Config: z<Partial<Config>, LiveConfig> = z.object({
+  baseURL: z.string().default('').volatile(),
   providers: z.object({
     openai: providerProfile,
     claude: providerProfile,
     grok: providerProfile,
-  }),
+  }).default({}).volatile(),
   tools: z.object({
     generate: imageToolModelRef,
-  }),
+  }).default({}).volatile(),
 })
 
 /**
@@ -267,40 +284,11 @@ function resolveAdapterOptions(config: Config) {
   return { baseURL }
 }
 
-const EMPTY_PROVIDER: ProviderProfile = {}
-
-/** Provider map used until settings (or setConfig) provide real values. */
-function defaultProviders(): Record<ProviderKey, ProviderProfile> {
-  return { openai: EMPTY_PROVIDER, claude: EMPTY_PROVIDER, grok: EMPTY_PROVIDER }
-}
-
-export function apply(ctx: Context, config: Config): void {
-  // The loader may start this plugin before any `llm-sub2api:` settings exist,
-  // so normalize an empty/undefined config into a dormant boot: no baseURL and
-  // no provider profiles yet. The settings scope replaces `current` wholesale
-  // once the harness settings service is available.
-  let current = (): Config => {
-    const raw = config ?? {}
-    return {
-      baseURL: raw.baseURL ?? '',
-      providers: { ...defaultProviders(), ...(raw.providers ?? {}) },
-      ...(raw.tools !== undefined ? { tools: raw.tools } : {}),
-    }
-  }
-  const options = () => {
-    const raw = current()
-    return { ...raw, ...resolveAdapterOptions(raw) }
-  }
-  options()
-
-  // Best-effort guard for the bundled pi-ai multi-turn defect. pi-ai modules
-  // are lazy-loaded, so this runs well before any request imports estimate.js.
-  const patchResult = applyPiAiMultiTurnPatch()
-  if (patchResult.kind === 'patched') {
-    ctx.logger.info(`llm-sub2api: applied pi-ai multi-turn guard to ${patchResult.file}`)
-  } else if (patchResult.kind === 'skipped') {
-    ctx.logger.warn(`llm-sub2api: pi-ai multi-turn guard not applied — ${patchResult.reason}`)
-  }
+export function apply(ctx: Context, config: LiveConfig): void {
+  const current = () => readConfig(config)
+  const namespace = ctx.fiber.entry?.options.id ?? NS
+  resolveAdapterOptions(current())
+  ctx.effect(() => ctx.settings.configure({ auto: false }))
 
   const resolveApiKey = async (route: string, profile: ProviderProfile) => {
     if (profile.apiKeyEnv === undefined) {
@@ -318,11 +306,6 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
-  // ── pi-ai profile bridge ────────────────────────────────────────────────
-  // The chat routes are owned by dsh-llm-pi-ai: every `llm-sub2api:` change
-  // (and boot, via installSection's first onChange) materializes the
-  // configured groups as `llm-pi-ai:` provider profiles. A refused write
-  // (unserviceable profile) keeps the previous routes and is logged here.
   const syncPiAi = () => {
     syncPiAiProfiles(ctx, current()).catch((error) => {
       ctx.logger.error('llm-sub2api: refused to update llm-pi-ai profiles; keeping the previously registered routes')
@@ -336,22 +319,9 @@ export function apply(ctx: Context, config: Config): void {
   registerRoutes(ctx, {
     config: () => current(),
     setConfig: async (next) => {
-      // The settings snapshot is handed out frozen (immutable), so never mutate
-      // it. Persist through the settings service; its commit swaps the resolved
-      // value and re-notifies (which re-syncs the llm-pi-ai profiles), and we
-      // re-run the sync below so the response reports the routes that just
-      // activated. Without a settings service, fall back to an in-memory source.
-      const settings = ctx.get('settings')
-      if (settings !== undefined) {
-        await settings.replace(NS, next)
-      } else {
-        current = () => ({
-          baseURL: next.baseURL ?? '',
-          providers: { ...defaultProviders(), ...next.providers },
-          ...(next.tools !== undefined ? { tools: next.tools } : {}),
-        })
-      }
-      syncPiAi()
+      resolveAdapterOptions(next)
+      await ctx.settings.replace(namespace, next)
+      await syncPiAiProfiles(ctx, current())
     },
     listRegisteredRoutes: () => ctx.llm.listProviders()
       .map((info) => info.id)
@@ -364,23 +334,6 @@ export function apply(ctx: Context, config: Config): void {
     resolveApiKey,
   })
 
-  ctx.settings.installSection(ctx, NS, Config, config, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: () => {
-      try {
-        syncPiAi()
-      } catch (error) {
-        ctx.logger.error('llm-sub2api: keeping the previous llm-pi-ai profiles after a refused update')
-        ctx.logger.error(error)
-      }
-    },
-  })
+  syncPiAi()
+  ctx.on('loader/volatile-update', syncPiAi)
 }
-
-// NOTE: no default export. The harness loader (cordis-plugin-loader
-// unwrapExports) treats a module's default export as the plugin entry;
-// `Config` here is the settings schema, so exporting it as default makes the
-// loader boot the schema as the plugin and fails with
-// "cannot get property \"baseURL\" without inject".

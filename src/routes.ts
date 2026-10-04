@@ -220,7 +220,7 @@ async function resolveProbeKey(
 export function registerRoutes(ctx: Context, routes: RouteContext): void {
   ctx.inject(['webServer'], (webCtx) => {
     const register = (path: string, handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>) => {
-      webCtx.webServer.register({ kind: 'exact', path, handler })
+      webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path, handler }))
     }
 
     // GET/POST config share one pathname. The webserver routes by path only and
@@ -408,7 +408,7 @@ export function registerRoutes(ctx: Context, routes: RouteContext): void {
     // attachment store re-verifies the digest against the stored object, so a
     // forged ref cannot read anything — the id must match the bytes exactly.
     // Bound to trusted local origins like every other plugin route.
-    webCtx.webServer.register({ kind: 'prefix', path: ROUTES.attachment, handler: async (req, res) => {
+    webCtx.effect(() => webCtx.webServer.register({ kind: 'prefix', path: ROUTES.attachment, handler: async (req, res) => {
       if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
       if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
       let ref: ImageAttachmentRef
@@ -437,6 +437,6 @@ export function registerRoutes(ctx: Context, routes: RouteContext): void {
       } catch {
         json(res, 404, { error: 'attachment not found' })
       }
-    } })
+    } }))
   })
 }
