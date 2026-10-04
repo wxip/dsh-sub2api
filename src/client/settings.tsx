@@ -380,6 +380,137 @@ function serializeToolRef(ref: ImageToolModelRef): ImageToolModelRef | undefined
   return { provider, model }
 }
 
+interface DefaultModelSelection {
+  provider: string
+  model: string
+  reasoningEffort?: string
+}
+
+interface DefaultModelState {
+  available: boolean
+  writable: boolean
+  reason?: string
+  selection?: DefaultModelSelection
+  selectionValid?: boolean
+  warning?: string
+  candidates: Array<{
+    provider: string
+    model: string
+    name: string
+    reasoningEfforts: Array<{ id: string; name: string }>
+  }>
+}
+
+const defaultModelKey = (selection: DefaultModelSelection) => JSON.stringify([selection.provider, selection.model])
+
+/** Defaults belong to the host's agent settings, independently of gateway config. */
+function DefaultModelCard({ refreshVersion, configBusy }: { refreshVersion: number; configBusy: boolean }) {
+  const [state, setState] = useState<DefaultModelState>()
+  const [selected, setSelected] = useState('')
+  const [effort, setEffort] = useState('')
+  const [busy, setBusy] = useState('load')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const request = useRef(0)
+
+  const applyState = (next: DefaultModelState) => {
+    if (!Array.isArray(next.candidates)) throw new Error('默认聊天模型服务返回了无效数据')
+    setState(next)
+    const current = next.candidates.find(candidate => next.selection && defaultModelKey(candidate) === defaultModelKey(next.selection))
+    setSelected(current ? defaultModelKey(current) : '')
+    setEffort(current?.reasoningEfforts.some(level => level.id === next.selection?.reasoningEffort) ? next.selection!.reasoningEffort! : '')
+  }
+
+  const refresh = useCallback(async () => {
+    const id = ++request.current
+    setBusy('load'); setMessage('')
+    try {
+      const next = await api<DefaultModelState>(`${BASE}/default-model`)
+      if (id !== request.current) return
+      applyState(next)
+      setError('')
+    } catch (e) {
+      if (id !== request.current) return
+      setError(String(e instanceof Error ? e.message : e))
+    } finally {
+      if (id === request.current) setBusy('')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    return () => { request.current++ }
+  }, [refresh, refreshVersion])
+
+  const candidate = state?.candidates.find(item => defaultModelKey(item) === selected)
+  const disabled = busy.length > 0 || configBusy || !state?.available || !state.writable
+  const saveDefault = async () => {
+    if (disabled || !candidate) return
+    const id = ++request.current
+    setBusy('save'); setMessage('')
+    try {
+      const next = await api<DefaultModelState & { ok: boolean }>(`${BASE}/default-model`, {
+        method: 'POST',
+        body: JSON.stringify({ provider: candidate.provider, model: candidate.model, ...(effort ? { reasoningEffort: effort } : {}) }),
+      })
+      if (id !== request.current) return
+      if (!next.ok) throw new Error('默认聊天模型未保存')
+      applyState(next)
+      setError('')
+      setMessage('已设置默认聊天模型，仅对新建 Agent 生效。')
+    } catch (e) {
+      if (id === request.current) setError(String(e instanceof Error ? e.message : e))
+    } finally {
+      if (id === request.current) setBusy('')
+    }
+  }
+
+  return (
+    <section className="s2a_rowCard" aria-label="默认聊天模型" aria-busy={busy.length > 0}>
+      <div className="s2a_rowHead">
+        <span className="s2a_rowName">默认聊天模型</span>
+        <div className="s2a_modelActions">
+          <button type="button" className="s2a_btn" disabled={busy.length > 0 || configBusy} onClick={refresh}>刷新默认模型</button>
+          <button type="button" className="s2a_primary" disabled={disabled || !candidate} onClick={saveDefault}>{busy === 'save' ? '设置中…' : '设为默认'}</button>
+        </div>
+      </div>
+      <p className="s2a_intro">仅对新建 Agent 生效，不改变已有会话。新增或修改模型后，请先保存配置，再选择默认模型；此处只列出已保存、已注册且适合聊天的模型。</p>
+      {busy === 'load' && <p className="s2a_status" role="status">正在加载默认聊天模型…</p>}
+      <p className="s2a_status">当前默认：{state?.selection
+        ? `${state.selection.provider} / ${state.selection.model}${state.selection.reasoningEffort ? ` · ${state.selection.reasoningEffort}` : ''}`
+        : state ? '未指定' : '尚未加载'}</p>
+      {state?.selection && !state.candidates.some(item => defaultModelKey(item) === defaultModelKey(state.selection!)) && (
+        <p className="s2a_notice">当前默认不在本插件的可选模型中，保持原设置；仅在选择模型并点击“设为默认”后替换。</p>
+      )}
+      {state?.selectionValid === false && <p className="s2a_notice">当前默认模型已失效或不再适合聊天，请选择可用模型后重新设置。</p>}
+      {state?.warning && <p className="s2a_notice">{state.warning}</p>}
+      {state && (!state.available || !state.writable) && <p className="s2a_notice">{state.reason || (!state.available ? '默认聊天模型服务不可用' : '默认聊天模型设置为只读')}</p>}
+      {state && state.candidates.length === 0 && <p className="s2a_notice">暂无可用的已注册聊天模型，请先保存模型配置后刷新。</p>}
+      <div className="s2a_field">
+        <label className="s2a_fieldLabel">聊天模型</label>
+        <select className="s2a_input" aria-label="默认聊天模型" value={selected} disabled={disabled || !state?.candidates.length} onChange={event => {
+          const next = state?.candidates.find(item => defaultModelKey(item) === event.target.value)
+          setSelected(next ? defaultModelKey(next) : '')
+          setEffort(current => next?.reasoningEfforts.some(level => level.id === current) ? current : '')
+          setMessage('')
+        }}>
+          <option value="">请选择模型</option>
+          {state?.candidates.map(item => <option key={defaultModelKey(item)} value={defaultModelKey(item)}>{item.provider} / {item.name} ({item.model})</option>)}
+        </select>
+      </div>
+      <div className="s2a_field">
+        <label className="s2a_fieldLabel">思考强度</label>
+        <select className="s2a_input" aria-label="默认聊天模型思考强度" value={effort} disabled={disabled || !candidate?.reasoningEfforts.length} onChange={event => { setEffort(event.target.value); setMessage('') }}>
+          <option value="">自动（清除已保存的思考强度）</option>
+          {candidate?.reasoningEfforts.map(level => <option key={level.id} value={level.id}>{level.name}</option>)}
+        </select>
+      </div>
+      {error && <p className="s2a_status s2a_statusErr" role="alert">{error}</p>}
+      {message && <p className="s2a_status s2a_statusOk" role="status">{message}</p>}
+    </section>
+  )
+}
+
 export function Sub2ApiSettings() {
   const sectionRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -400,6 +531,7 @@ export function Sub2ApiSettings() {
   const [providers, setProviders] = useState<Record<string, ProviderState>>({})
   const [tools, setTools] = useState<ImageToolsState>(emptyTools())
   const [structuredConfig, setStructuredConfig] = useState(false)
+  const [defaultRefreshVersion, setDefaultRefreshVersion] = useState(0)
   const [expandedModels, setExpandedModels] = useState<Set<number>>(() => new Set())
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
@@ -551,6 +683,7 @@ export function Sub2ApiSettings() {
       const res = await api<{ ok: boolean; routes?: string[] }>(`${BASE}/config`, { method: 'POST', body: JSON.stringify(payload) })
       const routes = res.routes !== undefined && res.routes.length > 0 ? res.routes.join(', ') : '无（未填 key）'
       setMessage(`已保存。激活路由: ${routes}`)
+      setDefaultRefreshVersion(version => version + 1)
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e))
     } finally {
@@ -669,6 +802,7 @@ export function Sub2ApiSettings() {
           })}
         </div>
       </div>
+      <DefaultModelCard refreshVersion={defaultRefreshVersion} configBusy={busy.length > 0} />
       <ul className="s2a_rows">
         {PROVIDERS.map((def) => {
           const provider = providers[def.key] ?? emptyProvider()

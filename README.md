@@ -57,6 +57,16 @@ Open **Settings → Sub2API 模型** (or edit `$DSH_HOME/profiles/web/cordis.pat
 
 Store each key through the credentials service (the web Models page writes it, or export `SUB2API_OPENAI_API_KEY=…` etc.). A route activates only when its platform has a key and at least one model; clear the key (or empty the model list) to drop the route again.
 
+### Default chat model
+
+Open **Settings → Sub2API 模型 → 默认对话模型** to view the current default. Save the gateway configuration first, select a saved and registered Sub2API model and reasoning effort, then click **设为默认** (Set as default). **刷新默认模型** (Refresh default model) reloads the current selection and candidates.
+
+The `@deepseek-ai/dsh-agent-default-model` service persists this selection in the active profile so it survives restarts. It applies to future agents created without an explicit model; existing sessions keep their selection. Ordinary configuration saves and plugin startup do not overwrite the default. A current default from another provider remains visible and unchanged.
+
+Reasoning choices come from the live adapter; for example, a gateway `none` level appears as pi-ai's `off`. Saving the model-default effort removes the explicit effort override. Candidates exclude known dedicated image, video, embedding and other non-chat model families, and models explicitly lacking text input. The current catalog has no output-capability field, so users must still verify chat support for custom model IDs. Saving validates route and catalog membership without making a model request or probing gateway credentials.
+
+If the selected model or reasoning effort is removed from the catalog, the page asks you to choose again without replacing it automatically. If the default-model service or configuration editor is unavailable, this card explains why saving is disabled; the other Sub2API settings remain usable.
+
 ### Wire protocol (automatic per group)
 
 The gateway serves each platform group upstream through its NATIVE protocol, and pi-ai picks the endpoint automatically from the key's group — no configuration needed. Configure the **bare host** (no `/v1`): OpenAI-style endpoints get `/v1` appended automatically, and the Anthropic SDK appends `/v1/messages` itself:

@@ -17,11 +17,13 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { DefaultModelError, readDefaultModel, saveDefaultModel } from './default-model.ts'
 import { API_PROTOCOLS, PROVIDERS, gatewayApiRoot, type ApiProtocol, type CatalogModel, type Config, type ImageToolModelRef, type ImageToolsConfig, type ProviderKey, type ProviderProfile } from './index.ts'
 
 export const ROUTES = {
   get: '/plugins/dsh-sub2api/config',
   set: '/plugins/dsh-sub2api/config',
+  defaultModel: '/plugins/dsh-sub2api/default-model',
   discover: '/plugins/dsh-sub2api/discover',
   usage: '/plugins/dsh-sub2api/usage',
   status: '/plugins/dsh-sub2api/status',
@@ -222,6 +224,22 @@ export function registerRoutes(ctx: Context, routes: RouteContext): void {
     const register = (path: string, handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>) => {
       webCtx.effect(() => webCtx.webServer.register({ kind: 'exact', path, handler }))
     }
+
+    register(ROUTES.defaultModel, async (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+      if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+      try {
+        if (req.method === 'GET') {
+          json(res, 200, await readDefaultModel(ctx, routes.config()))
+        } else {
+          let body: Record<string, unknown>
+          try { body = await readJson(req) } catch { return json(res, 400, { error: '请求必须是有效 JSON' }) }
+          json(res, 200, { ok: true, ...await saveDefaultModel(ctx, routes.config(), body) })
+        }
+      } catch (error) {
+        json(res, error instanceof DefaultModelError ? error.status : 500, { error: safeMessage(error) })
+      }
+    })
 
     // GET/POST config share one pathname. The webserver routes by path only and
     // rejects duplicate paths, so a single handler dispatches on the method.

@@ -17,7 +17,11 @@
  * catalogs + keys), gateway model discovery and usage probes, the global
  * image-generation tools, and a bridge
  * that materializes the configured groups as `llm-pi-ai:` provider profiles
- * the moment the section lands (see `./pi-ai.ts`).
+ * the moment the section lands (see `./pi-ai.ts`). The same page also surfaces
+ * the harness default model (`./default-model.ts`): it reads the
+ * `agent-default-model` selection and saves a Sub2API route as the default for
+ * new agents, while ordinary saves and plugin startup leave that selection
+ * alone.
  *
  * Keys are stored through the harness credential seam; the base URL and
  * per-key model catalogs live in the `llm-sub2api:` settings section
@@ -52,6 +56,14 @@ export {
   type PiAiSettingsSection,
 } from './pi-ai.ts'
 export { applyPiAiMultiTurnPatch, type PiAiPatchResult } from './pi-ai-patch.ts'
+export {
+  DefaultModelError,
+  readDefaultModel,
+  saveDefaultModel,
+  type DefaultModelCandidate,
+  type DefaultModelSelection,
+  type DefaultModelState,
+} from './default-model.ts'
 
 export const name = 'llm-sub2api'
 export const inject: string[] = ['llm', 'settings', 'credentials']
