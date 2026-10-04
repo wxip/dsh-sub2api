@@ -159,9 +159,17 @@ interface ModelRow {
 
 const DEFAULT_REASONING_LEVELS = ['low', 'medium', 'high']
 
+/** Thinking levels a route default may name, in pi-ai's own order. */
+const REASONING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/** The route default the host fills in when a profile names none. */
+const DEFAULT_ROUTE_REASONING = 'high'
+
 interface ProviderState {
   key: string
   keyConfigured: boolean
+  /** Route default thinking level; the host normalizes a missing value to DEFAULT_ROUTE_REASONING. */
+  reasoning: string
   models: ModelRow[]
 }
 
@@ -177,7 +185,7 @@ interface ImageToolsState {
 interface ConfigState {
   baseURL: string
   catalogFormat?: 'structured-v1'
-  providers: Record<string, { keyConfigured: boolean; models: Array<CatalogModel | string> }>
+  providers: Record<string, { keyConfigured: boolean; reasoning?: string; models: Array<CatalogModel | string> }>
   tools?: {
     generate?: ImageToolModelRef
   }
@@ -335,7 +343,48 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function emptyProvider(): ProviderState {
-  return { key: '', keyConfigured: false, models: [] }
+  return { key: '', keyConfigured: false, reasoning: DEFAULT_ROUTE_REASONING, models: [] }
+}
+
+/**
+ * Thinking levels one model row ends up exposing, mirroring the host's pi-ai
+ * translation: a row switched off offers none, a manual list offers exactly its
+ * levels (`none` is pi-ai's `off`), and "自动" keeps the plugin's generic
+ * low/medium/high. An empty id is still unknown, so it constrains nothing.
+ */
+function rowReasoningLevels(row: ModelRow): string[] | undefined {
+  if (row.id.trim().length === 0) return undefined
+  if (row.reasoning === 'off') return []
+  if (row.reasoning === 'on') {
+    const declared = new Set(row.effortLevels.split(/[,，/\s]+/).filter(Boolean))
+    const levels = REASONING_LEVELS.filter(level => declared.has(level) || (level === 'off' && declared.has('none')))
+    return levels.some(level => level !== 'off') ? levels : []
+  }
+  return [...DEFAULT_REASONING_LEVELS]
+}
+
+/**
+ * The levels every configured model of one group offers. A sub2api route
+ * declares ONE default level for all of its models (the pi-ai profile field is
+ * per route) and the adapter refuses a request whose effective level the model
+ * does not offer, so only this intersection may be selected.
+ */
+function providerReasoningLevels(provider: ProviderState): string[] {
+  let levels: string[] | undefined
+  for (const row of provider.models) {
+    const rowLevels = rowReasoningLevels(row)
+    if (rowLevels === undefined) continue
+    levels = levels === undefined ? rowLevels : levels.filter(level => rowLevels.includes(level))
+  }
+  return levels ?? []
+}
+
+/** Ids of the configured models that cannot take one route default level. */
+function modelsWithoutLevel(provider: ProviderState, level: string): string[] {
+  return provider.models
+    .map(row => ({ id: row.id.trim(), levels: rowReasoningLevels(row) }))
+    .filter(entry => entry.id.length > 0 && entry.levels !== undefined && !entry.levels.includes(level))
+    .map(entry => entry.id)
 }
 
 function emptyToolRef(): ImageToolModelRef {
@@ -398,6 +447,7 @@ interface DefaultModelState {
     model: string
     name: string
     reasoningEfforts: Array<{ id: string; name: string }>
+    defaultEffort?: string
   }>
 }
 
@@ -501,8 +551,8 @@ function DefaultModelCard({ refreshVersion, configBusy }: { refreshVersion: numb
       <div className="s2a_field">
         <label className="s2a_fieldLabel">思考强度</label>
         <select className="s2a_input" aria-label="默认聊天模型思考强度" value={effort} disabled={disabled || !candidate?.reasoningEfforts.length} onChange={event => { setEffort(event.target.value); setMessage('') }}>
-          <option value="">自动（清除已保存的思考强度）</option>
-          {candidate?.reasoningEfforts.map(level => <option key={level.id} value={level.id}>{level.name}</option>)}
+          <option value="">{candidate?.defaultEffort ? `自动（按路由默认 ${candidate.defaultEffort}）` : '自动（清除已保存的思考强度）'}</option>
+          {candidate?.reasoningEfforts.map(level => <option key={level.id} value={level.id}>{level.name}{level.id === candidate.defaultEffort ? '（路由默认）' : ''}</option>)}
         </select>
       </div>
       {error && <p className="s2a_status s2a_statusErr" role="alert">{error}</p>}
@@ -555,6 +605,7 @@ export function Sub2ApiSettings() {
           map[def.key] = {
             key: '',
             keyConfigured: provider?.keyConfigured ?? false,
+            reasoning: provider?.reasoning ?? DEFAULT_ROUTE_REASONING,
             models: (provider?.models ?? []).map(modelRow),
           }
         }
@@ -635,7 +686,7 @@ export function Sub2ApiSettings() {
       if (!structuredConfig) throw new Error('服务端仍在运行旧版插件，请重启 DSH Web 后再保存结构化模型配置')
       const payload = {
         baseURL,
-        providers: {} as Record<string, { apiKey: string; models: CatalogModel[] }>,
+        providers: {} as Record<string, { apiKey: string; reasoning: string; models: CatalogModel[] }>,
         tools: {} as { generate?: ImageToolModelRef },
       }
       for (const def of PROVIDERS) {
@@ -676,7 +727,7 @@ export function Sub2ApiSettings() {
             ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
           }
         })
-        payload.providers[def.key] = { apiKey: provider.key, models }
+        payload.providers[def.key] = { apiKey: provider.key, reasoning: provider.reasoning || DEFAULT_ROUTE_REASONING, models }
       }
       const generate = serializeToolRef(tools.generate)
       if (generate !== undefined) payload.tools.generate = generate
@@ -806,6 +857,8 @@ export function Sub2ApiSettings() {
       <ul className="s2a_rows">
         {PROVIDERS.map((def) => {
           const provider = providers[def.key] ?? emptyProvider()
+          const routeLevels = providerReasoningLevels(provider)
+          const unsupportedModels = modelsWithoutLevel(provider, provider.reasoning)
           return (
             <li key={def.key} className="s2a_rowCard">
               <div className="s2a_rowHead">
@@ -835,6 +888,33 @@ export function Sub2ApiSettings() {
                     placeholder={provider.keyConfigured ? `${def.placeholder}（已配置，留空保持不变）` : def.placeholder}
                     onChange={(event) => updateProvider(def.key, { key: event.target.value })}
                   />
+                </div>
+                <div className="s2a_field">
+                  <label className="s2a_fieldLabel">默认思考等级</label>
+                  <select
+                    className="s2a_input"
+                    aria-label={`${def.label} 默认思考等级`}
+                    value={provider.reasoning}
+                    onChange={(event) => updateProvider(def.key, { reasoning: event.target.value })}
+                  >
+                    {/* A level outside the models' shared set stays listed so a
+                        stored value is never silently replaced in the form. */}
+                    {(routeLevels.includes(provider.reasoning) ? routeLevels : [provider.reasoning, ...routeLevels])
+                      .map(level => (
+                        <option key={level} value={level}>
+                          {level}{level === DEFAULT_ROUTE_REASONING ? '（默认）' : ''}{routeLevels.includes(level) ? '' : '（部分模型不支持）'}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="s2a_modelSource">
+                    未显式选择思考强度时按该档位发送；路由内所有模型都支持时，模型菜单不再出现 Default 一项。
+                  </span>
+                  {routeLevels.length === 0 && <p className="s2a_notice">该路由暂无模型或存在不支持任何档位的模型，默认思考等级不会生效。</p>}
+                  {routeLevels.length > 0 && unsupportedModels.length > 0 && (
+                    <p className="s2a_notice">
+                      以下模型不支持 {provider.reasoning}，默认思考等级对这些模型不生效（模型菜单仍会显示 Default）：{unsupportedModels.join('、')}
+                    </p>
+                  )}
                 </div>
                 <div className="s2a_field">
                   <label className="s2a_fieldLabel">模型列表</label>

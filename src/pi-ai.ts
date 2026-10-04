@@ -14,9 +14,12 @@
  * Every sub2api group is translated as a *hand-declared* route — pi-ai ships
  * no provider under these keys — with `api` naming the group's native wire
  * protocol (openai→responses, claude→messages, grok→chat-completions),
- * `baseURL` set to the shared gateway, and `models` carrying the configured
- * catalog with each model's capacity, modalities, and reasoning levels mapped
- * onto pi-ai's vocabulary (`none` becomes `off` with wire spelling `none`).
+ * `baseURL` set to the shared gateway, `reasoning` carrying the group's default
+ * thinking level (declared only when every model on the route offers it, since
+ * llm-pi-ai refuses an unsupported effective level), and `models` carrying the
+ * configured catalog with each model's capacity, modalities, and reasoning
+ * levels mapped onto pi-ai's vocabulary (`none` becomes `off` with wire
+ * spelling `none`).
  *
  * @module dsh-sub2api/pi-ai
  */
@@ -24,7 +27,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type { PiAiModelProfile, PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { CatalogModel, Config, ProviderKey, ProviderProfile } from './index.ts'
+import type { CatalogModel, Config, ProviderKey, ProviderProfile, ReasoningLevel } from './index.ts'
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_MAX_TOKENS,
@@ -105,6 +108,38 @@ function translateModel(model: CatalogModel): PiAiModelProfile {
 }
 
 /**
+ * The thinking levels one translated model ends up offering: `false` (a
+ * non-reasoning model) and a list no level survived offer none, otherwise the
+ * mapped dict's keys ARE the levels llm-pi-ai reports for it.
+ */
+function modelReasoningLevels(model: PiAiModelProfile): readonly string[] {
+  const efforts = model.reasoningEfforts
+  if (efforts === undefined || efforts === false) return []
+  return Object.keys(efforts)
+}
+
+/**
+ * The route-level default level to declare, or undefined when it must not be
+ * declared at all.
+ *
+ * llm-pi-ai resolves a request that names no level to the profile's
+ * `reasoning` and REFUSES a level the model does not offer
+ * (`UNSUPPORTED_REASONING_EFFORT`), so a route default some model on the route
+ * cannot take would break every such request to that model. The level is
+ * therefore declared only when every configured model offers it; otherwise the
+ * route keeps its previous behaviour (and the settings page reports why).
+ *
+ * @param profile - the configured provider profile.
+ * @param models - the translated catalog of the same route.
+ * @returns the level to declare, or undefined to declare none.
+ */
+function routeReasoning(profile: ProviderProfile, models: PiAiModelProfile[]): ReasoningLevel | undefined {
+  const level = profile.reasoning
+  if (level === undefined) return undefined
+  return models.every(model => modelReasoningLevels(model).includes(level)) ? level : undefined
+}
+
+/**
  * Translate one sub2api group into a hand-declared llm-pi-ai provider profile.
  * `apiKeyEnv` passes through verbatim (the harness resolves it per request
  * through `ctx.credentials`); routes without a key are skipped by the caller.
@@ -117,12 +152,17 @@ function translateModel(model: CatalogModel): PiAiModelProfile {
  */
 function translateProfile(key: ProviderKey, profile: ProviderProfile, baseURL: string, label: string): PiAiProviderProfile {
   const api = apiProtocolForKey(key, profile)
+  const models = (profile.models ?? []).map(translateModel)
+  const reasoning = routeReasoning(profile, models)
   return {
     ...(profile.apiKeyEnv !== undefined ? { apiKeyEnv: profile.apiKeyEnv } : {}),
     displayName: `Sub2API ${label}`,
     api,
     baseURL: api === 'anthropic-messages' ? gatewayAnthropicRoot(baseURL) : gatewayApiRoot(baseURL),
-    models: (profile.models ?? []).map(translateModel),
+    // The route default removes the picker's "Default" entry: the model menu
+    // only offers it while the model reports no default effort of its own.
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    models,
     // Route-level fallbacks mirror the plugin's old adapter defaults, so a
     // catalog entry that omits a size keeps sizing like before.
     defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
@@ -177,7 +217,14 @@ export async function syncPiAiProfiles(ctx: Context, config: Config): Promise<vo
   for (const route of Object.keys(providers)) {
     if (route.startsWith(ROUTE_PREFIX)) delete providers[route]
   }
-  Object.assign(providers, translateToPiAi(config))
+  const translated = translateToPiAi(config)
+  for (const def of PROVIDERS) {
+    const emitted = translated[def.route]
+    const declared = config.providers[def.key].reasoning
+    if (emitted === undefined || declared === undefined || emitted.reasoning === declared) continue
+    ctx.logger.warn(`llm-sub2api: route ${def.route} declares no default thinking level for "${declared}": a configured model does not offer it, so the model menu keeps its "Default" entry`)
+  }
+  Object.assign(providers, translated)
   const next: PiAiSettingsSection = { providers }
   const before = JSON.stringify(current?.providers ?? {})
   if (JSON.stringify(providers) === before) return

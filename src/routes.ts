@@ -18,7 +18,7 @@ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { DefaultModelError, readDefaultModel, saveDefaultModel } from './default-model.ts'
-import { API_PROTOCOLS, PROVIDERS, gatewayApiRoot, type ApiProtocol, type CatalogModel, type Config, type ImageToolModelRef, type ImageToolsConfig, type ProviderKey, type ProviderProfile } from './index.ts'
+import { API_PROTOCOLS, DEFAULT_ROUTE_REASONING, PROVIDERS, REASONING_LEVELS, gatewayApiRoot, type ApiProtocol, type CatalogModel, type Config, type ImageToolModelRef, type ImageToolsConfig, type ProviderKey, type ProviderProfile, type ReasoningLevel } from './index.ts'
 
 export const ROUTES = {
   get: '/plugins/dsh-sub2api/config',
@@ -33,7 +33,7 @@ export const ROUTES = {
 export interface ConfigPayload {
   baseURL: string
   catalogFormat: 'structured-v1'
-  providers: Record<string, { keyConfigured: boolean; models: CatalogModel[] }>
+  providers: Record<string, { keyConfigured: boolean; reasoning?: ReasoningLevel; models: CatalogModel[] }>
   tools: ImageToolsConfig
 }
 
@@ -88,6 +88,7 @@ function readProviderConfig(config: Config): ConfigPayload {
     const profile = config.providers[def.key]
     providers[def.key] = {
       keyConfigured: profile.apiKeyEnv !== undefined,
+      ...(profile.reasoning !== undefined ? { reasoning: profile.reasoning } : {}),
       models: profile.models?.map((model) => ({ ...model })) ?? [],
     }
   }
@@ -298,6 +299,20 @@ export function registerRoutes(ctx: Context, routes: RouteContext): void {
               profile.api = api as ApiProtocol
             } else {
               return json(res, 400, { error: `${def.label} 的网关协议 "${api}" 无效，应为 ${API_PROTOCOLS.join(' / ')}` })
+            }
+          }
+          // Route default thinking level: not a pi-ai wire protocol but the
+          // profile field that keeps the model menu's "Default" entry away. An
+          // empty string restores the host's own default; the field is never
+          // absent, because every route declares one.
+          const reasoning = typeof raw?.reasoning === 'string' ? raw.reasoning.trim() : undefined
+          if (reasoning !== undefined) {
+            if (reasoning.length === 0) {
+              profile.reasoning = DEFAULT_ROUTE_REASONING
+            } else if ((REASONING_LEVELS as readonly string[]).includes(reasoning)) {
+              profile.reasoning = reasoning as ReasoningLevel
+            } else {
+              return json(res, 400, { error: `${def.label} 的默认思考等级 "${reasoning}" 无效，应为 ${REASONING_LEVELS.join(' / ')}` })
             }
           }
           profile.models = readCatalogModels(raw?.models, profile.models ?? [])

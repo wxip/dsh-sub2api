@@ -15,6 +15,8 @@ export interface DefaultModelCandidate {
   model: string
   name: string
   reasoningEfforts: Array<{ id: string; name: string }>
+  /** The level the model reports as its own default (the route's declared level). */
+  defaultEffort?: string
 }
 
 export interface DefaultModelState {
@@ -62,6 +64,7 @@ async function candidates(ctx: Context, config: Config): Promise<DefaultModelCan
         model: model.id,
         name: `${def.label} / ${model.name || model.id}`,
         reasoningEfforts: (resolved.reasoning?.efforts ?? []).map(effort => ({ id: String(effort.id), name: effort.name })),
+        ...(resolved.reasoning?.defaultEffort !== undefined ? { defaultEffort: String(resolved.reasoning.defaultEffort) } : {}),
       }
     }))
   }))

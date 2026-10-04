@@ -12,7 +12,7 @@ sub2api 是一个把订阅配额转成 OpenAI 兼容 API 的网关。它的模�
 - **流式对话（由 pi-ai 承载）**：SSE 流式、工具调用、reasoning 增量与 token 用量由 `dsh-llm-pi-ai` 映射到 harness 协议，天然正确处理 Responses API 的 `function_call` 顶层条目等 wire format 细节。
 - **模型发现**：一键「获取模型」调用 `GET {baseURL}/v1/models`（携带该 key），每个路由的模型目录与 sub2api 分组实际提供的完全一致。
 - **正式模型参数**：设置页按模型 ID 从 [models.dev](https://models.dev/) 自动补全名称、Context Window 与最大输出长度；匹配不到的字段保持为空，可手动填写。
-- **推理等级（思考模式）**：对话模型选择器可直接调整 `reasoning_effort`（透传网关）；设置页「思考强度」字段按 [models.dev](https://models.dev/) 的 `reasoning_options` 逐模型填充真实档位（如 `gpt-5.6-sol` 为 none/low/medium/high/xhigh/max，`deepseek-v4-flash` 为 low/high/max），设置页可编辑展示；可在 cordis.patch.yml 中用 `reasoningEfforts: []` 显式关闭。
+- **推理等级（思考模式）**：对话模型选择器可直接调整 `reasoning_effort`（透传网关）；设置页「思考强度」字段按 [models.dev](https://models.dev/) 的 `reasoning_options` 逐模型填充真实档位（如 `gpt-5.6-sol` 为 none/low/medium/high/xhigh/max，`deepseek-v4-flash` 为 low/high/max），设置页可编辑展示；可在 cordis.patch.yml 中用 `reasoningEfforts: []` 显式关闭。每条路由另有**默认思考等级**（路由级字段，默认 `high`，设置页可改）：未显式选择档位的请求按它发送，同时该档位成为模型的默认档位，模型菜单里的 Default 一项随之消失。只有当路由内所有已配置模型都支持该档位时才会声明（`dsh-llm-pi-ai` 会拒绝模型不支持的档位），否则设置页会点名不受支持的模型，而不会让它们的请求失败。
 - **用量查询**：「查看用量」调用 `GET {baseURL}/v1/usage`，汇总配额、余额、限流窗口与订阅周期用量。
 - **标准配置**：baseURL 与模型目录存于 `llm-sub2api` 插件条目的 `config`（`$DSH_HOME/profiles/web/cordis.patch.yml`，web 模型页可直接写入）；key 走 harness 凭据存储。
 - **供应商图标**来自 [lobehub/lobe-icons](https://lobehub.com/icons)，以 SVG 内嵌在设置页中。
@@ -107,6 +107,7 @@ sub2api 网关的每个分组在上游走**原生协议**，pi-ai 按分组自�
 
 - **图片输入**：models.dev 的 `attachment` / `modalities.input` 有数据就自动定（如 gpt-5.6-luna → 文本+图片，deepseek-v4-flash → 仅文本）；没数据时按模型 ID 推断（`gpt-*` / `claude-*` / `gemini-*` / `grok-*` / `glm-*` 等默认支持图片），可手动在 cordis.patch.yml 写 `input: [text]` 强制仅文本。
 - **思考强度**：models.dev 的 `reasoning_options` 有数据就自动填真实档位（如 deepseek-v4-flash → high/max）；否则默认 low/medium/high，`reasoning: false` 的模型自动标为不支持。
+- **默认思考等级**：每个分组（路由）一个，默认 `high`，在分组卡片顶部的「默认思考等级」里改。它是 `llm-pi-ai` profile 的 `reasoning` 字段：未指定档位的请求按它发送，并且模型菜单里不再出现 Default（Default 只在模型没有默认档位时才列出）。可选档位限于该路由所有模型都支持的档位交集；出现交集之外的档位（例如给路由加了只支持 high/max 的模型却选了 medium）时，页面会点名这些模型，翻译层也会放弃声明该档位，避免它们的请求被拒。
 
 挂图后请求按分组原生协议携带图片：openai → Responses `input_image`，claude → Messages `image`（base64），grok → chat/completions `image_url`。
 

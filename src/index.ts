@@ -88,6 +88,20 @@ export const REASONING_EFFORTS: readonly { id: string; name: string }[] = [
   { id: 'high', name: 'High' },
 ]
 
+/** One thinking level in pi-ai's own vocabulary (the adapter's `THINKING_LEVELS`). */
+export type ReasoningLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Every thinking level a pi-ai route can name, in strength order. */
+export const REASONING_LEVELS: readonly ReasoningLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * Thinking level a route declares when its configuration names none. `high` is
+ * the level the harness itself assumes for an unnamed effort, so a sub2api
+ * route keeps the posture an unconfigured harness had while gaining the
+ * declared default that removes the picker's "Default" entry.
+ */
+export const DEFAULT_ROUTE_REASONING: ReasoningLevel = 'high'
+
 export type ProviderKey = 'openai' | 'claude' | 'grok'
 
 export interface ProviderDef {
@@ -134,6 +148,16 @@ export interface CatalogModel {
 export interface ProviderProfile {
   /** Credential reference (environment-variable name) resolved per request through `ctx.credentials`. */
   apiKeyEnv?: string
+  /**
+   * Default thinking level for every model on this route, in pi-ai's
+   * vocabulary. The harness reports a declared level as the model's
+   * `defaultEffort`, which is what removes the chat model menu's "Default"
+   * row (and the ACP "Provider default" option): an unnamed effort stops
+   * being a choice of its own. A request that names no level is dispatched
+   * with this one. Absent: no route default (the menu keeps its "Default"
+   * row); the schema fills {@link DEFAULT_ROUTE_REASONING} in.
+   */
+  reasoning?: ReasoningLevel
   /**
    * Wire protocol spoken to the gateway for this platform group. Absent
    * selects the group's native protocol (openai → responses, claude →
@@ -210,6 +234,19 @@ const apiProtocol = z.union([
 
 const providerProfile = z.object({
   apiKeyEnv: z.string().role('credential-ref'),
+  // Every route declares a default thinking level: an absent field would leave
+  // the model menu offering its localised "Default" entry beside the levels the
+  // model actually has. The translation drops the level again whenever a
+  // configured model on the route does not offer it (see `./pi-ai.ts`).
+  reasoning: z.union([
+    z.const('off'),
+    z.const('minimal'),
+    z.const('low'),
+    z.const('medium'),
+    z.const('high'),
+    z.const('xhigh'),
+    z.const('max'),
+  ]).default(DEFAULT_ROUTE_REASONING),
   api: apiProtocol,
   models: z.array(catalogModel),
 })
