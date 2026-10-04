@@ -1,5 +1,5 @@
 {
-  "name": "@godd6366/dsh-sub2api",
+  "name": "@errort/dsh-sub2api",
   "description": "Connect your sub2api gateway to DeepSeek Harness: OpenAI-compatible multi-provider routes (OpenAI / Claude / Grok) behind one base URL, with per-key model discovery, usage lookup, global image generation, and a settings page.",
   "version": "0.2.2",
   "license": "MIT",
@@ -13,13 +13,13 @@
     "grok",
     "image-generation"
   ],
-  "homepage": "https://github.com/GodD6366/dsh-sub2api#readme",
+  "homepage": "https://github.com/wxip/dsh-sub2api#readme",
   "bugs": {
-    "url": "https://github.com/GodD6366/dsh-sub2api/issues"
+    "url": "https://github.com/wxip/dsh-sub2api/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GodD6366/dsh-sub2api.git"
+    "url": "git+https://github.com/wxip/dsh-sub2api.git"
   },
   "type": "module",
   "main": "lib/index.js",

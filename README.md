@@ -23,7 +23,7 @@ Sub2API is an AI API gateway that turns subscription quota into OpenAI-compatibl
 Requires DeepSeek Harness **0.2.0-rc.2**. Plugin 0.2.2 uses Loader-owned `Volatile` configuration and the new settings forms API; DSH 0.1.x is outside this release's compatibility range. Settings are persisted in the active profile's `cordis.patch.yml`; the browser UI uses `dsh-client-ui-renderer`.
 
 ```bash
-dsh plugin --profile web add @godd6366/dsh-sub2api
+dsh plugin --profile web add @errort/dsh-sub2api
 ```
 
 or, from this repository:
@@ -107,9 +107,13 @@ npm run build     # tsdown → lib/ + client wrapper
 npm run typecheck
 ```
 
-## GitHub Releases
+## npm and GitHub Releases
 
-Pushing a `v<version>` tag runs `.github/workflows/release.yml`: install locked dependencies, typecheck, build and test, then package the prebuilt plugin and publish a GitHub Release with the `.tgz` and `SHA256SUMS` assets. The tag must match the versions in `package.json` and `package-lock.json`. Versions containing a prerelease identifier, such as `v0.2.3-rc.1`, create prereleases. Reruns update assets on the existing release. The workflow uses GitHub's built-in `GITHUB_TOKEN`; no npm publishing token is required.
+Pushing a `v<version>` tag runs `.github/workflows/release.yml`: install locked dependencies, typecheck, build and test, then publish the same prebuilt `.tgz` as `@errort/dsh-sub2api` on npm and attach it with `SHA256SUMS` to a GitHub Release. The tag must match the versions in `package.json` and `package-lock.json`. Stable versions use npm's `latest` tag; versions with a prerelease identifier, such as `v0.2.3-rc.1`, use `next` and create GitHub prereleases. Reruns skip an existing npm version only when its integrity matches the tested package; different contents require a version bump.
+
+Before the first release, add an `NPM_TOKEN` secret under **Settings → Secrets and variables → Actions** in `wxip/dsh-sub2api`. Use an npm granular access token permitted to create and publish `@errort/dsh-sub2api` and run automated releases. If the account requires 2FA, the token must allow bypassing 2FA for publishing. Never commit the token or write it into installation configuration.
+
+After the first release, configure the npm package's **Settings → Trusted Publisher** for GitHub Actions: organization/user `wxip`, repository `dsh-sub2api`, workflow filename `release.yml`, and no environment. Remove the GitHub `NPM_TOKEN` secret to use npm Trusted Publishing (OIDC) for subsequent releases. The workflow uses npm 11.19.0 and grants `id-token: write` to the npm publishing job; GitHub Release uploads use the built-in `GITHUB_TOKEN`. See [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/).
 
 Commit and push the code and workflow before pushing the tag. This example uses this checkout's `github` remote; substitute the remote for your target repository:
 
@@ -119,12 +123,18 @@ git tag v0.2.2
 git push github v0.2.2
 ```
 
-To release an existing tag manually, open **Actions → Release → Run workflow** and enter the tag. Manual dispatch requires the workflow on the default branch. The workflow publishes Release assets only, not to npm.
+To release an existing tag manually, open **Actions → Release → Run workflow** and enter the tag. Manual dispatch requires the workflow on the default branch. Configure npm authentication before the first release; a failed npm publication prevents the GitHub Release job from running.
+
+After publication, install a specific npm version directly:
+
+```powershell
+dsh plugin --profile desktop add "@errort/dsh-sub2api@0.2.2"
+```
 
 Download the `.tgz` from the Release's **Assets**, then install it:
 
 ```powershell
-dsh plugin --profile desktop add "C:\Users\admin\Downloads\godd6366-dsh-sub2api-0.2.2.tgz"
+dsh plugin --profile desktop add "C:\Users\admin\Downloads\errort-dsh-sub2api-0.2.2.tgz"
 ```
 
 Replace `desktop` with `web` for the Web profile. The package includes compiled plugin files and does not require permission to run a Git dependency's `prepare` script. GitHub's automatically generated Source code archives are not substitutes for this installation package.

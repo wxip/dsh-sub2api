@@ -22,7 +22,7 @@ sub2api 是一个把订阅配额转成 OpenAI 兼容 API 的网关。它的模�
 要求 DeepSeek Harness **0.2.0-rc.2**。插件 0.2.2 使用 Loader 管理的 `Volatile` 配置和新版设置表单接口；0.1.x 不在本版本的兼容范围内。设置保存在当前 profile 的 `cordis.patch.yml`，浏览器界面使用 `dsh-client-ui-renderer` 服务。
 
 ```bash
-dsh plugin --profile web add @godd6366/dsh-sub2api
+dsh plugin --profile web add @errort/dsh-sub2api
 ```
 
 或直接在本仓库目录：
@@ -109,9 +109,13 @@ npm run build     # tsdown → lib/ + client wrapper
 npm run typecheck
 ```
 
-## 发布到 GitHub Release
+## 发布到 npm 和 GitHub Release
 
-推送 `v<版本号>` 标签后，`.github/workflows/release.yml` 自动安装锁定依赖、执行类型检查和测试、生成 npm 安装包，再创建 GitHub Release 并上传 `.tgz` 和 `SHA256SUMS`。标签必须与 `package.json` 和 `package-lock.json` 的版本一致；含预发布标识的版本（如 `v0.2.3-rc.1`）自动标记为 prerelease。重复运行时会更新已有 Release 的同名附件。工作流使用 GitHub 自带的 `GITHUB_TOKEN`，无需 npm 发布令牌。
+推送 `v<版本号>` 标签后，`.github/workflows/release.yml` 自动安装锁定依赖、执行类型检查和测试、生成预构建安装包，将同一个 `.tgz` 发布为 npm 的 `@errort/dsh-sub2api`，再创建 GitHub Release 并上传 `.tgz` 和 `SHA256SUMS`。标签必须与 `package.json` 和 `package-lock.json` 的版本一致；正式版本使用 npm 的 `latest`，含预发布标识的版本（如 `v0.2.3-rc.1`）使用 `next` 并创建 GitHub prerelease。重复发布已存在的 npm 版本时，仅在安装包 integrity 一致时跳过 npm 上传；内容不同则必须增加版本号。
+
+首次发布前，在 `wxip/dsh-sub2api` 的 **Settings → Secrets and variables → Actions** 添加 `NPM_TOKEN`，使用具有 `@errort/dsh-sub2api` 创建与发布权限、允许自动化发布的 npm granular access token。如账号要求 2FA，该 token 需要允许绕过发布时的 2FA。不要将 token 写入仓库或安装配置。
+
+首次发布成功后，进入 npm 包的 **Settings → Trusted Publisher** 配置 GitHub Actions：organization/user 填 `wxip`，repository 填 `dsh-sub2api`，workflow filename 填 `release.yml`，environment 留空。然后移除 GitHub 的 `NPM_TOKEN` secret，后续发布使用 npm Trusted Publishing（OIDC）。工作流使用 npm 11.19.0，并在发布 job 授予 `id-token: write`；GitHub Release 使用自带的 `GITHUB_TOKEN`。详情见 [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)。
 
 先提交并推送代码及工作流，再推送标签。以下示例发布到本仓库的 `github` remote；发布到其他仓库时替换 remote 名称：
 
@@ -121,12 +125,18 @@ git tag v0.2.2
 git push github v0.2.2
 ```
 
-也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已有标签手动发布；手动触发需要工作流已存在于默认分支。工作流只发布 Release 附件，不发布到 npm。
+也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已有标签手动发布；手动触发需要工作流已存在于默认分支。首次发布前需完成上述认证配置，npm 发布失败时不会继续创建 GitHub Release。
+
+发布后可直接按版本安装：
+
+```powershell
+dsh plugin --profile desktop add "@errort/dsh-sub2api@0.2.2"
+```
 
 从 Release 的 **Assets** 下载 `.tgz` 安装包，再执行：
 
 ```powershell
-dsh plugin --profile desktop add "C:\Users\admin\Downloads\godd6366-dsh-sub2api-0.2.2.tgz"
+dsh plugin --profile desktop add "C:\Users\admin\Downloads\errort-dsh-sub2api-0.2.2.tgz"
 ```
 
 Web profile 将 `desktop` 替换为 `web`。`.tgz` 包含已构建的插件文件，安装时无需 Git 来源的 `prepare` 构建许可；GitHub 自动生成的 Source code 压缩包不能替代该安装包。
