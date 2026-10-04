@@ -1,5 +1,5 @@
 {
-  "name": "@errort/dsh-sub2api",
+  "name": "@wxip/dsh-sub2api",
   "description": "Connect your sub2api gateway to DeepSeek Harness: OpenAI-compatible multi-provider routes (OpenAI / Claude / Grok) behind one base URL, with per-key model discovery, usage lookup, global image generation, and a settings page.",
   "version": "0.2.2",
   "license": "MIT",
@@ -13,19 +13,20 @@
     "grok",
     "image-generation"
   ],
-  "homepage": "https://github.com/wxip/dsh-sub2api#readme",
+  "homepage": "https://github.com/GodD6366/dsh-sub2api#readme",
   "bugs": {
-    "url": "https://github.com/wxip/dsh-sub2api/issues"
+    "url": "https://github.com/GodD6366/dsh-sub2api/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wxip/dsh-sub2api.git"
+    "url": "git+https://github.com/GodD6366/dsh-sub2api.git"
   },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -36,7 +37,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "check": "npm run typecheck && npm run build",
     "patch:pi-ai": "node scripts/patch-pi-ai.mjs",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "release:npm": "npm run typecheck && npm test && npm publish --ignore-scripts --access public --registry=https://registry.npmjs.org/"
   },
   "exports": {
     ".": {

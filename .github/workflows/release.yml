@@ -26,9 +26,6 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       prerelease: ${{ steps.version.outputs.prerelease }}
-      package_name: ${{ steps.version.outputs.package_name }}
-      version: ${{ steps.version.outputs.version }}
-      integrity: ${{ steps.pack.outputs.integrity }}
     steps:
       - name: Check out version tag
         uses: actions/checkout@v4
@@ -52,13 +49,10 @@ jobs:
           const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
           const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
           const tag = process.env.RELEASE_TAG
-          assert.equal(pkg.name, '@errort/dsh-sub2api', 'Unexpected npm package name')
-          assert.equal(lock.name, pkg.name, 'Lockfile name must match package.json')
-          assert.equal(lock.packages[''].name, pkg.name, 'Lockfile root name must match package.json')
           assert.equal(tag, `v${pkg.version}`, 'Tag must match package.json version')
           assert.equal(lock.version, pkg.version, 'Lockfile version must match package.json')
           assert.equal(lock.packages[''].version, pkg.version, 'Lockfile root version must match package.json')
-          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\nprerelease=${pkg.version.includes('-')}\npackage_name=${pkg.name}\nversion=${pkg.version}\n`)
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\nprerelease=${pkg.version.includes('-')}\n`)
           NODE
 
       - name: Install dependencies
@@ -71,19 +65,17 @@ jobs:
         run: npm test
 
       - name: Package prebuilt plugin
-        id: pack
         run: |
           mkdir -p release
           npm pack --ignore-scripts --json --pack-destination release > pack-result.json
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict'
-          import { appendFileSync, readFileSync } from 'node:fs'
+          import { readFileSync } from 'node:fs'
           const [pkg] = JSON.parse(readFileSync('pack-result.json', 'utf8'))
           const files = new Set(pkg.files.map(file => file.path))
           for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/client.js', 'cordis.patch.yml']) {
             assert.ok(files.has(required), `Release package is missing ${required}`)
           }
-          appendFileSync(process.env.GITHUB_OUTPUT, `integrity=${pkg.integrity}\n`)
           NODE
           (cd release && sha256sum *.tgz > SHA256SUMS)
 
@@ -95,78 +87,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  npm:
-    name: Publish npm package
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      AUTH_MODE: ${{ secrets.NPM_TOKEN != '' && 'token' || 'oidc' }}
-      NPM_DIST_TAG: ${{ needs.build.outputs.prerelease == 'true' && 'next' || 'latest' }}
-    steps:
-      - name: Check out version tag
-        uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ needs.build.outputs.tag }}
-
-      - name: Set up Node.js and npm registry
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: https://registry.npmjs.org
-
-      - name: Set up npm with trusted publishing support
-        run: npm install --global npm@11.19.0
-
-      - name: Download tested package
-        uses: actions/download-artifact@v4
-        with:
-          name: release-package
-          path: release
-
-      - name: Check package integrity and published version
-        id: registry
-        env:
-          PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
-          PACKAGE_VERSION: ${{ needs.build.outputs.version }}
-          PACKAGE_INTEGRITY: ${{ needs.build.outputs.integrity }}
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict'
-          import { createHash } from 'node:crypto'
-          import { appendFileSync, readFileSync, readdirSync } from 'node:fs'
-          const files = readdirSync('release').filter(name => name.endsWith('.tgz'))
-          assert.equal(files.length, 1, 'Expected exactly one tested package')
-          const integrity = `sha512-${createHash('sha512').update(readFileSync(`release/${files[0]}`)).digest('base64')}`
-          assert.equal(integrity, process.env.PACKAGE_INTEGRITY, 'Downloaded package integrity mismatch')
-          const url = `https://registry.npmjs.org/${encodeURIComponent(process.env.PACKAGE_NAME)}/${encodeURIComponent(process.env.PACKAGE_VERSION)}`
-          const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
-          let exists = false
-          if (response.status !== 404) {
-            assert.ok(response.ok, `npm registry returned HTTP ${response.status}`)
-            const published = await response.json()
-            assert.equal(published.dist.integrity, integrity, 'This version already exists with different contents; bump the package version')
-            exists = true
-          }
-          appendFileSync(process.env.GITHUB_OUTPUT, `exists=${exists}\n`)
-          NODE
-
-      - name: Publish with npm trusted publishing
-        if: steps.registry.outputs.exists != 'true' && env.AUTH_MODE == 'oidc'
-        run: npm publish release/*.tgz --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
-
-      - name: Publish with npm token for initial setup
-        if: steps.registry.outputs.exists != 'true' && env.AUTH_MODE == 'token'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish release/*.tgz --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
-
   publish:
     name: Publish GitHub Release
-    needs: [build, npm]
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

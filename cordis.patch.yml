@@ -8,4 +8,4 @@
 
 - insert:
     - id: llm-sub2api
-      name: '@errort/dsh-sub2api'
+      name: '@wxip/dsh-sub2api'
